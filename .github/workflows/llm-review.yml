@@ -149,7 +149,9 @@ jobs:
             echo "chunks=[]" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # shellcheck disable=SC2086 # DATES는 공백으로 구분한 날짜 목록이라 일부러 나눈다.
           python3 module2_news_pipeline/llm_review/chunk_batch.py split --dates $DATES
+          # shellcheck disable=SC2086 # DATES는 공백으로 구분한 날짜 목록이라 일부러 나눈다.
           echo "chunks=$(python3 module2_news_pipeline/llm_review/chunk_batch.py list --dates $DATES)" >> "$GITHUB_OUTPUT"
 
       # 조각과 함께 review가 쓸 데이터(CSV, 이전 이슈 파일)도 넘긴다.
@@ -329,7 +331,9 @@ jobs:
           DATES: ${{ needs.plan.outputs.dates }}
         run: |
           set -euo pipefail
+          # shellcheck disable=SC2086 # DATES는 공백으로 구분한 날짜 목록이라 일부러 나눈다.
           python3 module2_news_pipeline/llm_review/chunk_batch.py join --dates $DATES
+          # shellcheck disable=SC2086 # DATES는 공백으로 구분한 날짜 목록이라 일부러 나눈다.
           python3 module2_news_pipeline/llm_review/chunk_batch.py check --dates $DATES
           for d in $DATES; do
             python3 module2_news_pipeline/llm_review/merge_llm_results.py --date "$d"
@@ -501,7 +505,9 @@ jobs:
       - name: 판정 결과 확인
         env:
           DATES: ${{ needs.plan.outputs.dates }}
-        run: python3 module2_news_pipeline/llm_review/chunk_batch.py check --dates $DATES
+        run: |
+          # shellcheck disable=SC2086 # DATES는 공백으로 구분한 날짜 목록이라 일부러 나눈다.
+          python3 module2_news_pipeline/llm_review/chunk_batch.py check --dates $DATES
 
       - name: 테스트
         run: python3 -m pytest module2_news_pipeline/ module3_excel_generator/ -q
