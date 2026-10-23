@@ -33,7 +33,9 @@ code=$?
 took=$((SECONDS - start))
 
 subtype=$(jq -r '.subtype // "없음"' "$LOG_DIR/${name}.json" 2>/dev/null || echo "없음")
-is_error=$(jq -r '.is_error // true' "$LOG_DIR/${name}.json" 2>/dev/null || echo true)
+# `.is_error // true`는 쓰지 않는다. jq의 //는 false도 비었다고 보고 true로 바꿔서
+# 성공한 실행까지 실패로 처리한다.
+is_error=$(jq -r 'if .is_error == false then "false" else "true" end' "$LOG_DIR/${name}.json" 2>/dev/null || echo true)
 turns=$(jq -r '.num_turns // "?"' "$LOG_DIR/${name}.json" 2>/dev/null || echo "?")
 denials=$(jq -r '.permission_denials | length? // 0' "$LOG_DIR/${name}.json" 2>/dev/null || echo "?")
 
