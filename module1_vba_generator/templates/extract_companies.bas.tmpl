@@ -1,0 +1,142 @@
+' ------------------------------------------------------------------
+' 모듈 1 산출물 — 법인 뉴스 이슈 트래커 스펙 5.1절 기준 자동 생성 코드
+' 원본: 기존 검증 완료된 ExtractCompaniesByTeam 로직 (5.1.1절) 재사용
+' 결과는 즉시 창(Debug.Print)에 텍스트로 출력하고, 담당자가 이를 복사해
+' 인터넷망에서 corp_team_mapping.csv로 정리한다(스펙 5.1.2절).
+' 즉시 창은 200줄이 넘으면 앞쪽 줄부터 사라진다(실측 확인, 늘릴 수 없는
+' 한계). 법인 하나당 한 줄씩 찍으면 금방 넘치므로, 팀당 한 줄로 모아
+' 찍는다.
+'
+' 모듈1은 "법인명 × 팀" 리스트를 뽑아 출력하는 것만 한다. 별칭
+' (alias)·베이스명 계산 등 뉴스 매칭용 가공은 모듈2(Python) 쪽 책임이다
+' — 폐쇄망에서 돌리는 VBA는 최대한 단순하게 유지한다.
+'
+' Attribute VB_Name 줄을 일부러 빼뒀다. Import File로 불러오면 VBA
+' 편집기가 모듈 이름을 자동으로 매기고(예: Module1), 코드를 그대로
+' 복사해 표준 모듈에 붙여넣어도 그 줄이 코드창에 그대로 남아 "컴파일
+' 오류: 구문 오류"가 난다 — Attribute는 사람이 타이핑하는 코드가 아니라
+' VBE가 파일을 내보낼 때 붙이는 메타데이터라서다.
+'
+' 실행 방법:
+'   1. 업무망의 팀별 법인 리스트 엑셀 파일을 연다.
+'   2. Alt+F11 로 VBA 편집기를 연 뒤, 이 파일을 Import 하거나 코드를
+'      새 표준 모듈에 붙여넣는다.
+'   3. ExtractCompaniesByTeamToFile 매크로를 실행한다.
+'   4. VBA 편집기의 즉시 창(Ctrl+G)에서 결과를 확인한다.
+' ------------------------------------------------------------------
+Option Explicit
+
+Sub ExtractCompaniesByTeamToFile()
+    Dim teamNum As Integer
+    Dim ws As Worksheet
+    Dim lastRow As Long
+    Dim r As Long
+    Dim rawValue As Variant
+    Dim corpName As String
+    Dim checkColStart As String
+    Dim checkColEnd As String
+    Dim checkRange As Range
+    Dim cell As Range
+    Dim hasNonZero As Boolean
+    Dim rowCount As Long
+    Dim matchedList As String
+    Dim matchedCount As Long
+
+    rowCount = 0
+
+    For teamNum = {{TEAM_MIN}} To {{TEAM_MAX}}
+        Set ws = FindTeamSheet(teamNum)
+        If ws Is Nothing Then
+            Debug.Print teamNum & "팀 시트를 찾을 수 없습니다."
+        Else
+            GetCheckColumns teamNum, checkColStart, checkColEnd
+            matchedList = ""
+            matchedCount = 0
+
+            lastRow = ws.Range("{{CORP_NAME_COLUMN}}" & ws.Rows.Count).End(xlUp).Row
+            r = {{FIRST_CORP_ROW}}
+            Do While r <= lastRow
+                rawValue = ws.Cells(r, "{{CORP_NAME_COLUMN}}").Value
+                ' 수식이 걸린 셀이 #N/A 등 오류를 반환하면 Trim(오류값)이
+                ' "런타임 오류 13: 형식이 일치하지 않습니다"로 죽는다 —
+                ' 실내부망 실행 결과에서 확인된 데이터 품질 이슈라 빈
+                ' 법인명으로 취급하고 건너뛴다.
+                If IsError(rawValue) Then
+                    corpName = ""
+                Else
+                    corpName = Trim(rawValue)
+                End If
+                If corpName <> "" And Not IsExcludedLabel(corpName) Then
+                    Set checkRange = ws.Range(checkColStart & r & ":" & checkColEnd & r)
+                    hasNonZero = False
+                    For Each cell In checkRange
+                        If IsNumeric(cell.Value) Then
+                            If cell.Value <> 0 Then
+                                hasNonZero = True
+                                Exit For
+                            End If
+                        End If
+                    Next cell
+
+                    If hasNonZero Then
+                        If matchedList = "" Then
+                            matchedList = corpName
+                        Else
+                            matchedList = matchedList & ", " & corpName
+                        End If
+                        matchedCount = matchedCount + 1
+                        rowCount = rowCount + 1
+                    End If
+                End If
+                r = r + {{ROW_STEP}}
+            Loop
+
+            Debug.Print teamNum & "팀 (" & matchedCount & "건) - " & matchedList
+        End If
+    Next teamNum
+
+    MsgBox "완료: " & rowCount & "건 추출" & vbCrLf & "즉시 창(Ctrl+G)에서 결과를 확인하세요.", vbInformation
+End Sub
+
+Function FindTeamSheet(teamNum As Integer) As Worksheet
+    Dim ws As Worksheet
+    Dim target As String
+    target = teamNum & "팀"
+    For Each ws In ThisWorkbook.Worksheets
+        If Replace(ws.Name, " ", "") = target Then
+            Set FindTeamSheet = ws
+            Exit Function
+        End If
+    Next ws
+    Set FindTeamSheet = Nothing
+End Function
+
+Sub GetCheckColumns(teamNum As Integer, ByRef colStart As String, ByRef colEnd As String)
+    Select Case teamNum
+{{CHECK_COLUMN_CASES}}
+        Case Else
+            colStart = ""
+            colEnd = ""
+    End Select
+End Sub
+
+Function IsExcludedLabel(corpName As String) As Boolean
+    ' D열 범위 안에 실제 법인명이 아닌 소계/합계 라벨(예: "수익")이 섞여
+    ' 있는 경우를 걸러낸다 (실제 내부망 실행 결과에서 확인된 데이터 품질
+    ' 이슈). 목록은 {{EXCLUDED_LABELS_COMMENT}}.
+    ' Array()는 항상 Variant 배열을 반환한다 — String() 같은 구체적인
+    ' 타입으로 선언한 변수에 곧바로 대입하면 "런타임 오류 13: 형식이
+    ' 일치하지 않습니다"가 난다. Variant로 받아야 한다.
+    Dim excluded As Variant
+    Dim i As Integer
+
+    excluded = Array({{EXCLUDED_LABELS_ARRAY}})
+
+    IsExcludedLabel = False
+    For i = LBound(excluded) To UBound(excluded)
+        If corpName = excluded(i) Then
+            IsExcludedLabel = True
+            Exit Function
+        End If
+    Next i
+End Function

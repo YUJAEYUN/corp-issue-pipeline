@@ -1,0 +1,17 @@
+{
+  "sheet_name_pattern": "{team}팀",
+  "team_numbers": [1, 2, 3, 4, 5, 6],
+  "corp_name_column": "D",
+  "first_corp_row": 4,
+  "row_step": 2,
+  "check_column_ranges": {
+    "1": ["DS", "EA"],
+    "2": ["DS", "EA"],
+    "3": ["DS", "EA"],
+    "4": ["DS", "EA"],
+    "5": ["DS", "EA"],
+    "6": ["FE", "FM"]
+  },
+  "output_file_name": "corp_team_mapping.csv",
+  "excluded_labels": ["수익"]
+}

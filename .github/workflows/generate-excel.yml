@@ -1,0 +1,76 @@
+name: 이슈트래커 엑셀 생성
+
+# 이미 검토된 이슈 JSON으로 엑셀만 다시 만든다(LLM 미사용). 데이터는 비공개
+# 데이터 저장소에서 받고, 엑셀도 그 저장소에 커밋한다.
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "생성할 기준일 (YYYY-MM-DD, 합본은 YYYY-MM-DD~YYYY-MM-DD)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: generate-excel
+  cancel-in-progress: false
+
+env:
+  # 비공개 데이터 저장소. 저장소 변수 DATA_REPO로 바꿀 수 있다.
+  DATA_REPO: ${{ vars.DATA_REPO || 'YUJAEYUN/corp-issue' }}
+  COMMIT_NAME: ${{ vars.COMMIT_NAME }}
+  COMMIT_EMAIL: ${{ vars.COMMIT_EMAIL }}
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: 데이터 저장소 체크아웃 (비공개)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DATA_REPO }}
+          token: ${{ secrets.DATA_REPO_TOKEN }}
+          ref: main
+          path: .data
+
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: module3_excel_generator/requirements.txt
+
+      - name: 데이터 가져오기
+        run: |
+          set -euo pipefail
+          bash .github/scripts/data_repo.sh branch
+          bash .github/scripts/data_repo.sh pull
+
+      - name: 로그에서 법인명 가리기
+        run: python3 .github/scripts/mask_corp_names.py
+
+      - name: 의존성 설치
+        run: pip install -r module3_excel_generator/requirements.txt
+
+      - name: 엑셀 생성
+        env:
+          RUN_DATE: ${{ inputs.date }}
+        run: |
+          set -euo pipefail
+          # 기본 출력 위치(outputs/<YYYY년 M월>/)에 그대로 만든다.
+          python3 module3_excel_generator/generate_excel.py --date "$RUN_DATE"
+
+      - name: 엑셀을 데이터 저장소에 커밋 & 푸시
+        env:
+          RUN_DATE: ${{ inputs.date }}
+        run: |
+          set -euo pipefail
+          echo "이슈트래커 엑셀 생성 (${RUN_DATE})" > "$RUNNER_TEMP/commit-msg.txt"
+          bash .github/scripts/data_repo.sh push "$RUNNER_TEMP/commit-msg.txt" outputs

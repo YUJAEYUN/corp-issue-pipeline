@@ -1,0 +1,200 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "corp-issue 전체 아키텍처",
+    "animation": "trace",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "corp-list",
+        "label": "법인 리스트 준비",
+        "focus": [
+          "corp_csv",
+          "naver_api",
+          "pipeline"
+        ],
+        "note": "모듈1이 만든 VBA로 업무망에서 뽑은 법인×팀 CSV가 모듈2 검색 대상이 된다."
+      },
+      {
+        "id": "collect-review",
+        "label": "수집과 검토",
+        "focus": [
+          "pipeline",
+          "issues_batch",
+          "llm_review"
+        ],
+        "note": "모듈 2가 뉴스를 모으면 이어서 도는 검토 워크플로에서 Claude가 자동으로 못 정한 기사를 규칙에 따라 판정한다."
+      },
+      {
+        "id": "review-to-excel",
+        "label": "검토부터 엑셀까지",
+        "focus": [
+          "llm_review",
+          "excel_gen"
+        ],
+        "note": "판정 병합, 같은 사건 묶기, 2차 점검, 팀별 시트 생성과 커밋까지 한 워크플로로 이어진다."
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "corplist",
+      "label": "법인 리스트 (모듈1 + 데이터)"
+    },
+    {
+      "id": "collect",
+      "label": "모듈2: 뉴스 수집"
+    },
+    {
+      "id": "human",
+      "label": "LLM 검토 (Actions + Claude Code)",
+      "variant": "exception"
+    },
+    {
+      "id": "excel",
+      "label": "모듈3: 엑셀 생성"
+    }
+  ],
+  "phases": [
+    {
+      "id": "prepare",
+      "label": "법인 리스트",
+      "fromCol": 0,
+      "toCol": 0
+    },
+    {
+      "id": "collect_phase",
+      "label": "수집 · 필터 · 보강",
+      "fromCol": 1,
+      "toCol": 2,
+      "variant": "emphasis"
+    },
+    {
+      "id": "decide_phase",
+      "label": "검토 · 병합 · 산출",
+      "fromCol": 3,
+      "toCol": 4,
+      "variant": "dashed"
+    }
+  ],
+  "groups": [
+    {
+      "id": "cost_group",
+      "label": "구독 사용량, 별도 API 요금 없음",
+      "lane": "human",
+      "fromCol": 3,
+      "toCol": 3,
+      "variant": "security"
+    }
+  ],
+  "mainPath": [
+    "corp_csv",
+    "pipeline",
+    "issues_batch",
+    "llm_review",
+    "excel_gen"
+  ],
+  "nodes": [
+    {
+      "id": "corp_csv",
+      "lane": "corplist",
+      "col": 0,
+      "type": "database",
+      "label": "법인×팀 CSV",
+      "sublabel": "모듈1 VBA + 업무망 매크로, 447행",
+      "width": 170
+    },
+    {
+      "id": "naver_api",
+      "lane": "collect",
+      "col": 0,
+      "type": "external",
+      "label": "네이버 뉴스 API",
+      "sublabel": "법인명 + 키워드 검색",
+      "width": 150
+    },
+    {
+      "id": "pipeline",
+      "lane": "collect",
+      "col": 1,
+      "type": "backend",
+      "label": "모듈2: pipeline.py",
+      "sublabel": "필터 · 요약보강 · 중복제거",
+      "tag": "트랙1+트랙2",
+      "width": 190
+    },
+    {
+      "id": "issues_batch",
+      "lane": "collect",
+      "col": 2,
+      "type": "database",
+      "label": "이슈 + 검토 배치",
+      "sublabel": "issues.json / batch.json",
+      "width": 180
+    },
+    {
+      "id": "llm_review",
+      "lane": "human",
+      "col": 3,
+      "type": "security",
+      "label": "LLM 리뷰",
+      "sublabel": "애매 판정 · 신규법인 특정 · 요약 재작성",
+      "tag": "llm gate",
+      "width": 220
+    },
+    {
+      "id": "excel_gen",
+      "lane": "excel",
+      "col": 4,
+      "type": "backend",
+      "label": "모듈3: 결과 병합 + 엑셀 생성",
+      "sublabel": "merge_llm_results.py → generate_excel.py",
+      "width": 260
+    }
+  ],
+  "edges": [
+    {
+      "from": "corp_csv",
+      "to": "pipeline",
+      "label": "법인명 검색 대상"
+    },
+    {
+      "from": "naver_api",
+      "to": "pipeline",
+      "variant": "dashed"
+    },
+    {
+      "from": "pipeline",
+      "to": "issues_batch"
+    },
+    {
+      "from": "issues_batch",
+      "to": "llm_review",
+      "label": "애매 · 신규 후보만"
+    },
+    {
+      "from": "llm_review",
+      "to": "excel_gen",
+      "label": "판정 결과"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "실행 방식",
+      "items": [
+        "수집부터 엑셀까지 GitHub Actions가 매일 자동 실행",
+        "판정이 하나라도 빠지면 엑셀을 만들지 않는다"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "비용 원칙",
+      "items": [
+        "임베딩·LLM API 키 호출 없음",
+        "애매한 판정만 Claude Code(구독 토큰)로 검토"
+      ]
+    }
+  ]
+}

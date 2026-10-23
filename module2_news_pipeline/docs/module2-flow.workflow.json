@@ -1,0 +1,64 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "모듈2 뉴스 파이프라인 처리 흐름",
+    "animation": "trace",
+    "visual_preset": "signal-flow",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "existing-corp-path", "label": "기존 법인 이슈 (트랙1)", "focus": ["corp_csv", "naver_corp", "dedup1", "filter1", "classify1", "issues"], "note": "관리 중인 429개 법인명으로 검색해 확정 이슈로 나가는 기본 경로." },
+      { "id": "new-corp-path", "label": "신규 법인 탐지 (트랙2)", "focus": ["naver_kw", "dedup2", "new_check", "review_batch"], "note": "키워드만으로 검색해 관리 리스트에 없는 법인을 후보로 걸러낸다." }
+    ]
+  },
+  "lanes": [
+    { "id": "track1", "label": "트랙1: 법인명 검색 (기존)" },
+    { "id": "review", "label": "사람 판단 (Claude Code)", "variant": "exception" },
+    { "id": "track2", "label": "트랙2: 키워드 검색 (신규 탐지)" }
+  ],
+  "phases": [
+    { "id": "collect", "label": "수집", "fromCol": 0, "toCol": 1 },
+    { "id": "process", "label": "정리 · 필터 · 매칭", "fromCol": 2, "toCol": 3, "variant": "emphasis" },
+    { "id": "decide", "label": "판단 · 산출", "fromCol": 4, "toCol": 5, "variant": "dashed" }
+  ],
+  "groups": [
+    { "id": "track2_group", "label": "신규 법인 탐지 경로", "lane": "track2", "fromCol": 1, "toCol": 3, "variant": "dashed" },
+    { "id": "review_group", "label": "구독 사용량, 별도 API 요금 없음", "lane": "review", "fromCol": 4, "toCol": 5, "variant": "security" }
+  ],
+  "mainPath": ["corp_csv", "naver_corp", "dedup1", "filter1", "classify1", "issues"],
+  "nodes": [
+    { "id": "corp_csv", "lane": "track1", "col": 0, "type": "database", "label": "법인×팀 CSV", "sublabel": "447건", "width": 110 },
+    { "id": "naver_corp", "lane": "track1", "col": 1, "type": "external", "label": "네이버 API", "sublabel": "법인명 검색", "width": 110 },
+    { "id": "dedup1", "lane": "track1", "col": 2, "type": "backend", "label": "기간필터+중복제거", "sublabel": "D-1 · 유사도", "width": 110 },
+    { "id": "filter1", "lane": "track1", "col": 3, "type": "backend", "label": "키워드 필터", "sublabel": "3단계 판정", "width": 110 },
+    { "id": "classify1", "lane": "track1", "col": 4, "type": "backend", "label": "법인 매칭", "sublabel": "팀 배정", "width": 110 },
+    { "id": "issues", "lane": "track1", "col": 5, "type": "database", "label": "issues.json", "sublabel": "모듈3 입력", "width": 110 },
+
+    { "id": "naver_kw", "lane": "track2", "col": 1, "type": "external", "label": "네이버 API", "sublabel": "키워드 검색", "width": 110 },
+    { "id": "dedup2", "lane": "track2", "col": 2, "type": "backend", "label": "기간필터+중복제거", "sublabel": "D-1 · 유사도", "width": 110 },
+    { "id": "new_check", "lane": "track2", "col": 3, "type": "backend", "label": "미매칭 확인", "sublabel": "관리 리스트 대조", "width": 110 },
+
+    { "id": "review_batch", "lane": "review", "col": 4, "type": "messagebus", "label": "LLM 리뷰 배치", "sublabel": "판단 대기 3종", "width": 110 },
+    { "id": "claude_review", "lane": "review", "col": 5, "type": "security", "label": "Claude Code 판단", "sublabel": "일일 수동 실행", "width": 110 }
+  ],
+  "edges": [
+    { "id": "csv-to-corp-search", "from": "corp_csv", "to": "naver_corp", "label": "법인명 429개 쿼리", "variant": "emphasis" },
+    { "id": "corp-search-dedup", "from": "naver_corp", "to": "dedup1", "variant": "default" },
+    { "id": "dedup-filter", "from": "dedup1", "to": "filter1", "variant": "default" },
+    { "id": "filter-classify", "from": "filter1", "to": "classify1", "label": "pass", "variant": "emphasis" },
+    { "id": "csv-team-lookup", "from": "corp_csv", "to": "classify1", "label": "팀 조회", "variant": "dashed", "role": "branch", "fromSide": "top", "toSide": "top", "route": "up-channel" },
+    { "id": "classify-issues", "from": "classify1", "to": "issues", "label": "기존 이슈", "variant": "emphasis" },
+    { "id": "filter-ambiguous", "from": "filter1", "to": "review_batch", "label": "ambiguous", "variant": "security", "role": "branch" },
+
+    { "id": "kw-search-dedup", "from": "naver_kw", "to": "dedup2", "variant": "default" },
+    { "id": "dedup2-check", "from": "dedup2", "to": "new_check", "variant": "default" },
+    { "id": "check-review", "from": "new_check", "to": "review_batch", "label": "신규 후보", "variant": "security", "role": "branch" },
+
+    { "id": "batch-claude", "from": "review_batch", "to": "claude_review", "variant": "emphasis" },
+    { "id": "claude-merge", "from": "claude_review", "to": "issues", "label": "결과 병합", "variant": "emphasis", "role": "return" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "왜 2트랙인가", "items": ["법인명 검색만으로는 관리 리스트 밖 법인이 절대 안 나옴", "키워드 단독 검색으로 신규 법인 언급 기사를 잡는다"] },
+    { "dot": "emerald", "title": "비용 구조 (NFR-4)", "items": ["결정적 로직은 무료 스크립트로 자동화", "애매한 판단만 Claude Code 구독 사용량으로 처리"] }
+  ]
+}

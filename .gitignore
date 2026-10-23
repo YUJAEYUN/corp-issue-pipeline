@@ -1,0 +1,41 @@
+# 인증정보 (14절: 절대 커밋하지 않음)
+.env
+*.env
+**/secrets.json
+**/*api_key*
+
+# 임베딩 모델 캐시 (BGE-M3 등 대용량 다운로드 파일)
+**/model_cache/
+**/.cache/huggingface/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# 모듈 1 생성 산출물 (generate_vba.py로 재생성 가능)
+module1_vba_generator/output/*.bas
+!module1_vba_generator/output/.gitkeep
+
+# archify visual-check 검증 산출물 (스크린샷/영수증 — 재생성 가능, 용량만 큼)
+**/*.visual-check.json
+**/*.visual-check.html
+**/*.visual-check.*.png
+
+# OS / editor
+.DS_Store
+*.swp
+
+# LLM 검토 워크플로우가 배치를 나눈 조각(커밋하지 않는다)
+.llm_chunks/
+
+# 비공개 데이터. 이 저장소(공개)에는 올리지 않는다. 워크플로는 데이터 저장소를
+# .data/에 받아 이 경로로 복사해 쓴다(.github/scripts/data_repo.sh).
+/.data/
+/data/corp_team_mapping/corp_team_mapping.csv
+/module2_news_pipeline/output/
+/outputs/
+*.enc
+.review_report.md
