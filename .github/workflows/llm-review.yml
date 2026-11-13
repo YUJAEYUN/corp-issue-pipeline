@@ -44,6 +44,10 @@ on:
         description: "검토할 날짜 (YYYY-MM-DD, 여러 개면 공백으로 구분). 비우면 아직 검토 안 된 날짜를 자동으로 고른다."
         required: false
         type: string
+      recover_run_id:
+        description: "완료된 조각 판정을 복구할 실행 ID. Claude와 엑셀 생성 없이 비공개 trial 브랜치에만 저장한다."
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -60,8 +64,97 @@ env:
   CLAUDE_CODE_VERSION: 2.1.303
 
 jobs:
+  recover:
+    if: github.event_name == 'workflow_dispatch' && inputs.recover_run_id != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          persist-credentials: false
+      - name: 복구 입력 확인
+        env:
+          SOURCE_RUN: ${{ inputs.recover_run_id }}
+          DATES: ${{ inputs.dates }}
+        run: |
+          python3 - <<'PY'
+          import datetime, os
+          if not os.environ['SOURCE_RUN'].isdigit():
+              raise SystemExit('실행 ID는 숫자여야 합니다.')
+          dates = os.environ['DATES'].split()
+          if not dates:
+              raise SystemExit('복구 날짜를 지정해야 합니다.')
+          for value in dates:
+              if datetime.date.fromisoformat(value).isoformat() != value:
+                  raise SystemExit('날짜 형식은 YYYY-MM-DD입니다.')
+          PY
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.DATA_REPO }}
+          token: ${{ secrets.DATA_REPO_TOKEN }}
+          ref: main
+          path: .data
+      - name: 비공개 복구 브랜치 준비
+        env:
+          SOURCE_RUN: ${{ inputs.recover_run_id }}
+        run: git -C .data switch -c "recovery/run-${SOURCE_RUN}-${GITHUB_RUN_ID}"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -r module2_news_pipeline/requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: snapshot
+          run-id: ${{ inputs.recover_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/recover
+      - uses: actions/download-artifact@v4
+        with:
+          name: judged
+          run-id: ${{ inputs.recover_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/recover
+      - name: 판정 복원 및 검사
+        env:
+          ARTIFACT_PASSPHRASE: ${{ secrets.ARTIFACT_PASSPHRASE }}
+          DATES: ${{ inputs.dates }}
+        run: |
+          set -euo pipefail
+          bash .github/scripts/unseal.sh "$RUNNER_TEMP/recover/snapshot.enc"
+          bash .github/scripts/unseal.sh "$RUNNER_TEMP/recover/judged.enc" .llm_chunks
+          python3 .github/scripts/mask_corp_names.py
+          read -ra target_dates <<< "$DATES"
+          python3 module2_news_pipeline/llm_review/chunk_batch.py join --dates "${target_dates[@]}"
+          python3 module2_news_pipeline/llm_review/chunk_batch.py check --dates "${target_dates[@]}"
+          for date in "${target_dates[@]}"; do
+            python3 module2_news_pipeline/llm_review/merge_llm_results.py --date "$date"
+          done
+      - name: 비공개 브랜치에 체크포인트 저장
+        env:
+          DATES: ${{ inputs.dates }}
+          SOURCE_RUN: ${{ inputs.recover_run_id }}
+        run: |
+          set -euo pipefail
+          read -ra target_dates <<< "$DATES"
+          for date in "${target_dates[@]}"; do
+            month="${date:0:4}년 $((10#${date:5:2}))월"
+            for kind in issues llm_review_batch llm_review_result; do
+              file="module2_news_pipeline/output/$month/${kind}_${date}.json"
+              cp "$file" ".data/$file"
+              git -C .data add -f -- "$file"
+            done
+          done
+          git -C .data config user.name 'github-actions[bot]'
+          git -C .data config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C .data commit -m "Recover judge checkpoint from run $SOURCE_RUN; final review pending"
+          git -C .data push origin HEAD
+          echo "복구 브랜치: $(git -C .data branch --show-current)" >> "$GITHUB_STEP_SUMMARY"
+
   plan:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: inputs.recover_run_id == '' && (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: read
