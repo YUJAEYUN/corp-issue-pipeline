@@ -55,7 +55,11 @@ concurrency:
 env:
   # 비공개 데이터 저장소. 저장소 변수 DATA_REPO로 바꿀 수 있다.
   DATA_REPO: ${{ vars.DATA_REPO || 'YUJAEYUN/corp-issue' }}
+  # review(요약 재작성·중복 묶기·2차 점검)는 결과 품질을 크게 바꾸므로 Opus를 쓴다.
   CLAUDE_MODEL: claude-opus-5-5
+  # judge는 기사를 전부 읽는 반복 분류라 구독 사용량을 가장 많이 쓴다. 저장소 변수
+  # JUDGE_MODEL로 바꿀 수 있다.
+  JUDGE_MODEL: ${{ vars.JUDGE_MODEL || 'claude-sonnet-5-5' }}
   # claude-code-action@v1이 설치하는 것과 같은 버전이다.
   CLAUDE_CODE_VERSION: 2.1.303
 
@@ -220,6 +224,7 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           CHUNKS: ${{ needs.plan.outputs.chunks }}
           PARALLEL: "4"
+          CLAUDE_MODEL: ${{ env.JUDGE_MODEL }}
           LOG_DIR: ${{ runner.temp }}/claude-logs
         run: |
           set -o pipefail
