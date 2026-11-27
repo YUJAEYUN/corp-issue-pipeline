@@ -1,8 +1,9 @@
 name: 모듈2 - 뉴스 수집 파이프라인
 
-# 주말·공휴일을 포함해 매일 01:15 KST에 자동 실행하고, GitHub Actions
-# 탭의 "Run workflow"로도 수동 트리거할 수 있다. 매일 전일 뉴스를
-# 빠짐없이 수집하고, 주말·공휴일치는 다음 영업일 검토 때 하나로 합친다.
+# 주말·공휴일을 포함해 매일 03:30 KST쯤 외부 스케줄러(cron-job.org 등)가
+# workflow_dispatch로 실행한다(skip_if_collected=true). GitHub Actions 탭의
+# "Run workflow"로도 수동 트리거할 수 있다. 매일 전일 뉴스를 빠짐없이
+# 수집하고, 주말·공휴일치는 다음 영업일 검토 때 하나로 합친다.
 # 스펙 NFR-1은 이 자동 스케줄에 맞춰 갱신했다.
 # 이 워크플로우는 이 클라우드 세션과 달리 외부 인터넷(네이버 API)에
 # 접속할 수 있는 GitHub Actions 러너에서 돈다.
@@ -11,12 +12,12 @@ name: 모듈2 - 뉴스 수집 파이프라인
 # 저장소에 있다. 데이터 저장소를 .data/에 받아 작업 폴더로 복사해 쓰고,
 # 결과는 데이터 저장소에 커밋한다. 공개 로그에서 법인명은 가린다.
 #
-# 08:00이 아니라 01:15인 이유: 수집 대상은 실행 시각과 무관하게 항상
-# "KST 기준 어제 하루"라, 몇 시에 돌든 결과는 같다. 반면 GitHub의
-# schedule 트리거는 정각(0분)·UTC 자정 근처에 몰려 지연이 크다(실측
-# 사례: 08:00 KST 목표가 09:39 KST에 실행됨). 08:00 KST는 23:00 UTC로
-# 이 혼잡 시간대에 정확히 걸려 있어, 덜 몰리는 시간대(01:15 KST = 전날
-# 16:15 UTC)로 옮겨 지연 가능성을 낮췄다.
+# 외부 스케줄러를 쓰는 이유: GitHub의 schedule 트리거는 정시 실행을
+# 보장하지 않는다. 01:15 KST 예약이 2026-10 말에는 03~06시, 2026-11 말에는
+# 06~12시에 시작될 만큼 지연이 커졌다. workflow_dispatch는 바로 시작된다.
+# schedule은 외부 스케줄러가 멈췄을 때를 위한 예비로 남긴다. 둘 다 돌아도
+# 오늘 배치가 이미 있으면 나중 실행은 수집을 건너뛴다(중복 커밋 방지).
+# 수집 대상은 실행 시각과 무관하게 항상 "KST 기준 어제 하루"다.
 on:
   workflow_dispatch:
     inputs:
@@ -33,8 +34,14 @@ on:
         required: false
         type: boolean
         default: false
+      skip_if_collected:
+        description: "오늘 배치(issues_<오늘>.json)가 이미 있으면 수집을 건너뛴다(외부 스케줄러용)"
+        required: false
+        type: boolean
+        default: false
   schedule:
-    # cron은 UTC 기준. 01:15 KST(UTC+9)는 전날 16:15 UTC다.
+    # 예비 실행. cron은 UTC 기준. 01:15 KST(UTC+9)는 전날 16:15 UTC다.
+    # 실제 시작은 몇 시간씩 밀리므로, 외부 스케줄러가 먼저 돌았으면 건너뛴다.
     - cron: "15 16 * * *"
 
 permissions:
@@ -96,10 +103,34 @@ jobs:
       - name: 로그에서 법인명 가리기
         run: python3 .github/scripts/mask_corp_names.py
 
+      # 외부 스케줄러와 예비 schedule이 둘 다 돌 때, 나중 실행이 같은 날 배치를
+      # 다시 수집해 덮어쓰지 않게 한다. 날짜를 지정한 수동 실행은 건너뛰지 않는다.
+      - name: 오늘 배치가 이미 있는지 확인
+        id: guard
+        env:
+          EVENT: ${{ github.event_name }}
+          SKIP_IF_COLLECTED: ${{ inputs.skip_if_collected }}
+          DATE_FROM: ${{ inputs.date_from }}
+          DATE_TO: ${{ inputs.date_to }}
+        run: |
+          set -euo pipefail
+          skip=false
+          if [ "$EVENT" = "schedule" ] || { [ "${SKIP_IF_COLLECTED:-false}" = "true" ] && [ -z "${DATE_FROM:-}" ] && [ -z "${DATE_TO:-}" ]; }; then
+            today=$(TZ=Asia/Seoul date +%Y-%m-%d)
+            if [ -n "$(find module2_news_pipeline/output -name "issues_${today}.json" -print -quit 2>/dev/null)" ]; then
+              skip=true
+              echo "::notice::오늘(${today}) 배치가 이미 있어 수집을 건너뜁니다."
+              echo "오늘(${today}) 배치가 이미 있어 수집을 건너뛰었습니다." >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+
       - name: 의존성 설치
+        if: steps.guard.outputs.skip != 'true'
         run: pip install -r module2_news_pipeline/requirements.txt
 
       - name: 파이프라인 실행 (법인명 검색 + 키워드 검색 + 필터링)
+        if: steps.guard.outputs.skip != 'true'
         env:
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
@@ -115,6 +146,7 @@ jobs:
           python3 module2_news_pipeline/pipeline.py "${ARGS[@]}"
 
       - name: 결과를 데이터 저장소에 커밋 & 푸시
+        if: steps.guard.outputs.skip != 'true'
         run: |
           set -euo pipefail
           echo "모듈2 뉴스 수집 결과 ($(TZ=Asia/Seoul date +%Y-%m-%d))" > "$RUNNER_TEMP/commit-msg.txt"

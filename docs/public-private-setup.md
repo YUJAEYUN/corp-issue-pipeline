@@ -65,7 +65,20 @@ GitHub **Settings → Developer settings → Personal access tokens → Fine-gra
 
 데이터 저장소 **Settings → Actions → General → Disable actions**. 끄지 않으면 예약 수집이 두 번 돌고 비공개 저장소의 사용 시간을 계속 쓴다.
 
-### 6. 첫 실행
+### 6. 외부 스케줄러로 매일 수집 실행
+
+GitHub의 schedule 트리거는 몇 시간씩 늦게 시작된다(2026-11 말에는 01:15 KST 예약이 06~12시에 시작됐다). 그래서 외부 스케줄러가 매일 03:30 KST에 수집 워크플로를 `workflow_dispatch`로 실행하게 한다. 워크플로의 schedule은 예비로 남아 있고, 오늘 배치가 이미 있으면 수집을 건너뛴다.
+
+1. **토큰 만들기**: GitHub **Settings → Developer settings → Fine-grained tokens**에서 `corp-issue-pipeline` 저장소만 고르고, 권한은 **Actions: Read and write** 하나만 준다. 이 토큰으로는 워크플로 실행만 할 수 있다. 만료일을 정해 두고, 만료 전에 새로 발급해 바꾼다.
+2. **cron-job.org에 작업 만들기**(다른 스케줄러도 같다)
+   - URL: `https://api.github.com/repos/YUJAEYUN/corp-issue-pipeline/actions/workflows/module2-pipeline.yml/dispatches`
+   - 일정: 매일 03:30, 시간대 `Asia/Seoul`
+   - 메서드: `POST`
+   - 헤더: `Authorization: Bearer <토큰>`, `Accept: application/vnd.github+json`, `X-GitHub-Api-Version: 2022-11-28`
+   - 본문: `{"ref":"main","inputs":{"skip_if_collected":"true"}}`
+3. 스케줄러의 "지금 실행"(test run)으로 한 번 호출해 응답이 `204`인지, Actions에 실행이 생겼는지 확인한다. 이미 오늘 수집이 끝난 뒤라면 실행은 "오늘 배치가 이미 있어 수집을 건너뛰었습니다"로 끝난다.
+
+### 7. 첫 실행
 
 코드 저장소 Actions에서 **모듈2 - 뉴스 수집 파이프라인**을 수동으로 실행한다. 성공하면 검토가 이어서 돈다. 데이터 저장소에 수집·검토 커밋이 생기는지, 공개 로그와 Step Summary에 법인명이 없는지(`***`로 가려졌는지) 확인한다.
 
