@@ -20,7 +20,9 @@
 
 ```
 모듈2 - 뉴스 수집 파이프라인 (module2-pipeline.yml)
-  매일 01:15 KST 예약(실제 시작은 보통 05~08시). KST 기준 어제 기사를 수집한다.
+  매일 03:30 KST 외부 스케줄러가 실행한다(workflow_dispatch, skip_if_collected=true).
+  GitHub 예약(01:15 KST, 몇 시간씩 밀림)은 예비이고, 오늘 배치가 이미 있으면 건너뛴다.
+  KST 기준 어제 기사를 수집한다.
   -> 데이터 저장소 main에 issues_<날짜>.json, llm_review_batch_<날짜>.json 커밋
         | 수집이 성공하면 이어서 실행
         v
